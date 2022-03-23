@@ -244,3 +244,8 @@ real_time_delay (int64_t num, int32_t denom)
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
 }
+int
+get_timer_frequency ()
+{
+  return TIMER_FREQ;
+}
