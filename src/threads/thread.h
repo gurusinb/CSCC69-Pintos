@@ -4,7 +4,8 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
-
+/*Since we need to declare locks inside strucutre of thread we will include synch.h*/
+#include "threads/synch.h"
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -23,6 +24,7 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+#define PRI_DOMAIN 64                   /* [0-63] range of valid priorities*/
 
 /* A kernel thread or user process.
 
@@ -88,8 +90,18 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    
+     /*Adding attributes for our convinience*/
+     int max_priority ;                /* Considering priority and donation*/
+     int donated_priorities[PRI_MAX+1]; 
+     int64_t wakeup_time ;             /*wake_up time for sleeping threads*/
+     int recent_cpu ;
+     int nice ;       
+     int pre_computed_priority ;       /* [PRI_MAX - 2 * nice] */
+     struct lock* waiting_lock ;       
+     struct lock priority_lock ;
     struct list_elem allelem;           /* List element for all threads list. */
-
+   
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -107,6 +119,9 @@ struct thread
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
+/*Declaring load average as global variable which initializes to 0 when sytem boots*/
+int load_avg ;
+
 void thread_init (void);
 void thread_start (void);
 
@@ -118,6 +133,9 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 void thread_block (void);
 void thread_unblock (struct thread *);
+/*For removing busy wainting*/
+void thread_sleep (int64_t);
+void thread_wakeup (void);
 
 struct thread *thread_current (void);
 tid_t thread_tid (void);
@@ -137,5 +155,10 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+/*Priority donation functions*/
+void remove_donated_priorities (struct thread *t, struct list *doners);
+void donate_priority (struct thread *t, int priority);
+struct thread * remove_max_thread (struct list *list) ;
 
 #endif /* threads/thread.h */
