@@ -7,7 +7,10 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-  
+/* ##> Our implementation */
+#include "threads/fixed-point.h"
+#include <string.h>
+
 /* See [8254] for hardware details of the 8254 timer chip. */
 
 #if TIMER_FREQ < 19
@@ -60,7 +63,7 @@ timer_calibrate (void)
   /* Refine the next 8 bits of loops_per_tick. */
   high_bit = loops_per_tick;
   for (test_bit = high_bit >> 1; test_bit != high_bit >> 10; test_bit >>= 1)
-    if (!too_many_loops (loops_per_tick | test_bit))
+    if (!too_many_loops (high_bit | test_bit))
       loops_per_tick |= test_bit;
 
   printf ("%'"PRIu64" loops/s.\n", (uint64_t) loops_per_tick * TIMER_FREQ);
@@ -92,8 +95,14 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  /* while (timer_elapsed (start) < ticks)
+     thread_yield ();
+  */
+  
+  /* ##> Our implementation
+   * Put current thread to sleep for a fixed ticks */
+  thread_sleep(ticks);
+  /* <##*/
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -122,7 +131,6 @@ timer_nsleep (int64_t ns)
 
 /* Busy-waits for approximately MS milliseconds.  Interrupts need
    not be turned on.
-
    Busy waiting wastes CPU cycles, and busy waiting with
    interrupts off for the interval between timer ticks or longer
    will cause timer ticks to be lost.  Thus, use timer_msleep()
@@ -135,7 +143,6 @@ timer_mdelay (int64_t ms)
 
 /* Sleeps for approximately US microseconds.  Interrupts need not
    be turned on.
-
    Busy waiting wastes CPU cycles, and busy waiting with
    interrupts off for the interval between timer ticks or longer
    will cause timer ticks to be lost.  Thus, use timer_usleep()
@@ -148,7 +155,6 @@ timer_udelay (int64_t us)
 
 /* Sleeps execution for approximately NS nanoseconds.  Interrupts
    need not be turned on.
-
    Busy waiting wastes CPU cycles, and busy waiting with
    interrupts off for the interval between timer ticks or longer
    will cause timer ticks to be lost.  Thus, use timer_nsleep()
@@ -172,6 +178,39 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+
+  /* ##> Our implementation */
+  /* Each time a timer interrupt occurs, recent_cpu is incremented by 1 for
+   * the running thread only, unless the idle thread is running.
+   *
+   * Assumptions made by some of the tests require that these recalculations of
+   * recent_cpu be made exactly when the system tick counter reaches a multiple
+   * of a second, that is, when timer_ticks () % TIMER_FREQ == 0, and not at
+   * any other time.
+   *
+   * Because of assumptions made by some of the tests, load_avg must be updated
+   * exactly when the system tick counter reaches a multiple of a second, that
+   * is, when timer_ticks () % TIMER_FREQ == 0, and not at any other time.
+   */
+  if (thread_mlfqs)
+    {
+      struct thread *cur;
+      cur = thread_current ();
+      if (cur->status == THREAD_RUNNING)
+        {
+          cur->recent_cpu = ADD_INT (cur->recent_cpu, 1);
+        }
+      if (ticks % TIMER_FREQ == 0)
+        {
+          calculate_load_avg ();
+          /* recent_cpu depends on load_avg */
+          calculate_recent_cpu_for_all ();
+        }
+      if (ticks % 4 == 0)
+        {
+          calculate_advanced_priority_for_all ();
+        }
+    }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -195,7 +234,6 @@ too_many_loops (unsigned loops)
 
 /* Iterates through a simple loop LOOPS times, for implementing
    brief delays.
-
    Marked NO_INLINE because code alignment can significantly
    affect timings, so that if this function was inlined
    differently in different places the results would be difficult
@@ -243,9 +281,4 @@ real_time_delay (int64_t num, int32_t denom)
      the possibility of overflow. */
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
-}
-int
-get_timer_frequency ()
-{
-  return TIMER_FREQ;
 }
